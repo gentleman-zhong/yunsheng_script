@@ -287,7 +287,10 @@ def convert_tiepoints_data(_points, _tracks, _photos, _cams, _ori_utm):
       pic_name = pic[0]
       u = float(pic[1])
       v = float(pic[2])
-      cam_name = _photos[pic_name]['Camera']
+      if pic_name not in _photos:
+        continue
+      else:
+        cam_name = _photos[pic_name]['Camera']
       cam_data = _cams[cam_name]
       w = cam_data['width']
       h = cam_data['height']
@@ -396,7 +399,10 @@ def convert_and_filter_tiepoints_data(_points, _tracks, _photos, _cams, _ori_utm
       pic_name = pic[0]
       u = float(pic[1])
       v = float(pic[2])
-      cam_name = _photos[pic_name]['Camera']
+      if pic_name not in _photos:
+        continue
+      else:
+        cam_name = _photos[pic_name]['Camera']
       cam_data = _cams[cam_name]
       prj_type = cam_data['projection_type']
       w = cam_data['width']
@@ -525,13 +531,13 @@ if __name__ == '__main__':
   flag_filter = args.filter
 
   # set paths
-  reconstruction_json_path = os.path.join(directory_opensfm , 'reconstruction_adjust.json')
+  reconstruction_json_path = os.path.join(directory_opensfm , 'reconstruction.json')
   tracks_csv_path = os.path.join(directory_opensfm , 'converted_tracks.csv')
 
   if flag_filter:
     blocksexchange_xml_path = os.path.join(directory_opensfm , 'adjust_filter4.xml')
   else:
-    blocksexchange_xml_path = os.path.join(directory_opensfm , 'blockexchangeAT_bundle_filter5.xml')
+    blocksexchange_xml_path = os.path.join(directory_opensfm , 'blockexchangeAT.xml')
 
   # metadeata_xml_path = os.path.join(directory_opensfm , 'metadata.xml')
   
