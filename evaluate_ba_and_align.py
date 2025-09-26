@@ -16,7 +16,7 @@ def read_reference_lla(reference_file):
         data = json.load(f)
     return (data["latitude"], data["longitude"])
 
-def read_shots_info(reconstruction_file):
+def read_shots_cameras_info(reconstruction_file):
     """
     读取 reconstruction.json 文件中的 shots 信息
     返回一个 dict，key 为图片名，value 为 {rotation, translation, gps_position}
@@ -25,19 +25,22 @@ def read_shots_info(reconstruction_file):
         data = json.load(f)
 
     shots_info = {}
+    cameras_info = []
     for rec in data:  # reconstruction 文件是一个 list
         if "shots" not in rec:
             continue
+        cameras_info.append(rec.get("cameras", {}))
         for shot_name, shot_data in rec["shots"].items():
             if shot_name not in shots_info:
                 shots_info[shot_name] = {
                     "rotation": shot_data.get("rotation", []),
                     "translation": shot_data.get("translation", []),
-                    "gps_position": shot_data.get("gps_position", [])
+                    "gps_position": shot_data.get("gps_position", []),
+                    "camera": shot_data.get("camera", [])
                 }
             else:
                 print(f"Warning: shot {shot_name} already exists in shots_info.")
-    return shots_info
+    return shots_info, cameras_info
 
 def get_camera_position(rotation, translation):
     r_matrix = R.from_rotvec(rotation).as_matrix()
@@ -137,15 +140,77 @@ def utm_to_enu(x, y, z, lat0, lon0, alt0, utm_zone=50, northern=True):
     ])
 
     enu = R @ (ecef - ecef_ref)
-    return tuple(enu)
+    return enu
 
+def read_gcp_file(filepath):
+    data = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # 第一行是坐标系
+    crs = lines[0].strip()
+
+    # 解析后续行
+    for line in lines[1:]:
+        parts = line.strip().split()
+        if len(parts) < 7:
+            continue  # 跳过异常行
+
+        X, Y, Z = map(float, parts[:3])          # 世界坐标 (UTM)
+        img_x, img_y = map(float, parts[3:5])    # 像素坐标
+        image_name = parts[5]                    # 图像文件名
+        gcp_id = parts[6]                        # 控制点ID
+
+        data.append({
+            "X": X,
+            "Y": Y,
+            "Z": Z,
+            "img_x": img_x,
+            "img_y": img_y,
+            "image_name": image_name,
+            "gcp_id": gcp_id
+        })
+    return crs, data
+
+def get_reprojection_error(enu, shot_data, camera_data, pixel):
+
+    r_matrix = R.from_rotvec(shot_data["rotation"]).as_matrix()
+    t_local = np.array(shot_data["translation"])
+    M = np.eye(4)
+    M[:3, :3] = r_matrix
+    M[:3, 3] = t_local
+
+    cam_data = camera_data.copy()
+    scale = max(cam_data["width"], cam_data["height"])
+    cam_data["focal_x"] *= scale
+    cam_data["focal_y"] *= scale
+    cam_data["c_x"] = (cam_data["width"] - 1) / 2 + cam_data["c_x"] * scale
+    cam_data["c_y"] = (cam_data["height"] - 1) / 2 + cam_data["c_y"] * scale
+
+    x_rpj, y_rpj = reproject_brown(cam_data, M, enu)
+    x , y = pixel
+    return np.hypot(x - x_rpj, y - y_rpj)
+
+def reproject_brown(cam_data, M, coords_world):
+    """Brown 模型投影"""
+    pc = M @ np.array([coords_world[0], coords_world[1], coords_world[2], 1.0])
+
+    xn, yn = pc[0] / pc[2], pc[1] / pc[2]
+    r2 = xn**2 + yn**2
+    dr = 1 + cam_data['k1']*r2 + cam_data['k2']*r2**2 + cam_data['k3']*r2**3
+    dtx = 2*cam_data['p1']*xn*yn + cam_data['p2']*(r2 + 2*xn**2)
+    dty = 2*cam_data['p2']*xn*yn + cam_data['p1']*(r2 + 2*yn**2)
+
+    u = cam_data['focal_x'] * (dr*xn + dtx) + cam_data['c_x']
+    v = cam_data['focal_y'] * (dr*yn + dty) + cam_data['c_y']
+    return u, v
 
 def main1():
     parser = argparse.ArgumentParser(description="get gps residual")
     parser.add_argument("--opensfm_dir", type=str, required=True, help="Path to the OpenSfM project folder.")
     args = parser.parse_args()
     reconstruction_file = os.path.join(args.opensfm_dir, "reconstruction.json")
-    shots_info = read_shots_info(reconstruction_file)
+    shots_info, _ = read_shots_cameras_info(reconstruction_file)
     
     
     gps_distance_dict = {}
@@ -169,16 +234,41 @@ def main1():
     with open(os.path.join(args.opensfm_dir, "gps_residual.json"), "w", encoding="utf-8") as f:
         json.dump(gps_residual, f, indent=4)
 
-
 def main2():
     parser = argparse.ArgumentParser(description="get gcp residual")
     parser.add_argument("--opensfm_dir", type=str, required=True, help="Path to the OpenSfM project folder.")
     args = parser.parse_args()
 
-    gcp_file = os.path.join(args.opensfm_dir, "gcp_list.txt")
-    
+    reference_lla = os.path.join(args.opensfm_dir, "reference_lla.json")
+    lat0, lon0 = read_reference_lla(reference_lla)
 
+    shots_info, cameras_info = read_shots_cameras_info(os.path.join(args.opensfm_dir, "reconstruction.json"))
+
+    gcp_file = os.path.join(args.opensfm_dir, "gcp_list.txt")
+    crs, data = read_gcp_file(gcp_file)
+    utm_zone = int(crs.split()[-1][0:-1])
+    northern = (crs.split()[-1][-1]=='N')
+    final_list = []
+    for d in data:
+        d_enu = utm_to_enu(d["X"],d["Y"],d["Z"],lat0,lon0,0,utm_zone,northern)
+        shot_info = shots_info[d["image_name"]]
+        cam_name = shots_info[d["image_name"]]["camera"]
+        for cam in cameras_info:
+            if cam_name in cam:
+                cam_info = cam[cam_name]
+                break
+        reproj_error = get_reprojection_error(d_enu, shot_info, cam_info, (d["img_x"], d["img_y"]))
+        final_list.append(reproj_error)
+    final_list = np.array(final_list)
+    gcp_residual = {
+        "rmse": np.sqrt(np.mean(final_list**2)),
+        "mean": np.mean(final_list),
+        "max": np.max(final_list),
+        "per_gcp": final_list.tolist()
+    }
+    with open(os.path.join(args.opensfm_dir, "gcp_residual.json"), "w", encoding="utf-8") as f:
+        json.dump(gcp_residual, f, indent=4)
 
 
 if __name__ == "__main__":
-    main2()
+    main1()
