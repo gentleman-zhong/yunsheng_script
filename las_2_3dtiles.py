@@ -135,9 +135,9 @@ def convert_and_write_las(all_points, offset=None, out_path: Path = None):
     colors = np.array([p['color'] for p in all_points], dtype=np.float32)       # (N, 3)
 
     # 应用 XY 平移
-    # if offset is not None:
-    #     coords[:, 0] += offset[0]  # X 平移
-    #     coords[:, 1] += offset[1]  # Y 平移
+    if offset is not None:
+        coords[:, 0] += offset[0]  # X 平移
+        coords[:, 1] += offset[1]  # Y 平移
 
     # 写入 LAS 文件
     write_las_fit(out_path, coords, colors)

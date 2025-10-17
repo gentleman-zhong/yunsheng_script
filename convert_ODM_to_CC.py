@@ -535,7 +535,7 @@ if __name__ == '__main__':
   tracks_csv_path = os.path.join(directory_opensfm , 'converted_tracks.csv')
 
   if flag_filter:
-    blocksexchange_xml_path = os.path.join(directory_opensfm , 'adjust_filter4.xml')
+    blocksexchange_xml_path = os.path.join(directory_opensfm , 'filter_AT.xml')
   else:
     blocksexchange_xml_path = os.path.join(directory_opensfm , 'blockexchangeAT.xml')
 
@@ -551,9 +551,9 @@ if __name__ == '__main__':
   else:
     ori_utm = convert_origin(origin)
   # convert origin to utm
-  get_metadata_xml(ori_utm, metadeata_xml_path)
+  # get_metadata_xml(ori_utm, metadeata_xml_path)
 
-  # ori_utm = np.array([0., 0., 0.])
+  ori_utm = np.array([561777.0, 4325698.0, 0.])
 
   tracks_data = {}
   with open(tracks_csv_path, 'r') as tracks_file:
@@ -594,7 +594,7 @@ if __name__ == '__main__':
   # construct the tie points part
   points = reconstruction_data['points']
   if flag_filter:
-    tiepoints_data = convert_and_filter_tiepoints_data(points, tracks_data, photo_data, reconstruction_data['cameras'], ori_utm, 4.0, 2)
+    tiepoints_data = convert_and_filter_tiepoints_data(points, tracks_data, photo_data, reconstruction_data['cameras'], ori_utm, 1.0, 2)
   else:
     tiepoints_data = convert_tiepoints_data(points, tracks_data, photo_data, reconstruction_data['cameras'], ori_utm)
   for tp_id, tp_data in tiepoints_data.items():
