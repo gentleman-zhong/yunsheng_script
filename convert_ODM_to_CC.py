@@ -545,15 +545,15 @@ if __name__ == '__main__':
   with open(reconstruction_json_path, 'r') as reconstruction_file:
     reconstruction_data = json.load(reconstruction_file)[0] # it's [{things}]
 
-  origin = reconstruction_data['reference_lla']
-  if origin['latitude'] == 0. and origin['longitude'] == 0. and origin['altitude'] == 0.:
-    ori_utm = np.array([0., 0., 0.])
-  else:
-    ori_utm = convert_origin(origin)
+  # origin = reconstruction_data['reference_lla']
+  # if origin['latitude'] == 0. and origin['longitude'] == 0. and origin['altitude'] == 0.:
+  #   ori_utm = np.array([0., 0., 0.])
+  # else:
+  #   ori_utm = convert_origin(origin)
   # convert origin to utm
   # get_metadata_xml(ori_utm, metadeata_xml_path)
 
-  ori_utm = np.array([561777.0, 4325698.0, 0.])
+  ori_utm = np.array([0., 0., 0.])
 
   tracks_data = {}
   with open(tracks_csv_path, 'r') as tracks_file:

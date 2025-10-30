@@ -47,6 +47,7 @@ class ODM_Photo:
         self.yaw = None
         self.pitch = None
         self.roll = None
+        self.rotation = None
 
         self.focal_ratio = 0.85
 
@@ -137,8 +138,39 @@ class ODM_Photo:
                 except Exception:
                     # 容错：继续尝试下一个 xmp 块
                     continue
+        
         if tags is not None and last_xtags is not None:
             self.compute_focal(tags, last_xtags) 
+
+        self.rotation = self.EulerAnglesToRotationVector([self.roll, self.pitch, self.yaw])
+
+    def EulerAnglesToRotationVector(self, _angles):
+        # ENU to NED
+        A1 = np.array([[0, 1, 0],
+                    [1, 0, 0],
+                    [0, 0, -1]])
+        # NED to cam
+        A2 = np.array([[0, 1, 0],
+                    [0, 0, 1],
+                    [1, 0, 0]])
+
+        r = - np.pi * _angles[0] / 180
+        p = - np.pi * _angles[1] / 180
+        y = - np.pi * _angles[2] / 180
+        Rx = np.array([[1, 0, 0],
+                    [0, np.cos(r), -np.sin(r)],
+                    [0, np.sin(r), np.cos(r)]])
+        Ry = np.array([[np.cos(p), 0, np.sin(p)],
+                    [0, 1, 0],
+                    [-np.sin(p), 0, np.cos(p)]])
+        Rz = np.array([[np.cos(y), -np.sin(y), 0],
+                    [np.sin(y), np.cos(y), 0],
+                    [0, 0, 1]])
+        Rot = np.dot(Rx, np.dot(Ry, Rz))
+
+        M = np.dot(A2, np.dot(Rot, A1))
+        V = R.from_matrix(M).as_rotvec()
+        return V
 
     def _set_attr_from_xmp_tag(self, attr, xmp_tags, tags, cast=None):
         v = self._get_xmp_tag(xmp_tags, tags)
@@ -373,11 +405,9 @@ def generate_piclist(picPath: str, picNameList: list):
             lat = getattr(photo, 'latitude', None)
             lon = getattr(photo, 'longitude', None)
             alt = getattr(photo, 'altitude', None)
-            roll = getattr(photo, 'roll', None)
-            pitch = getattr(photo, 'pitch', None)
-            yaw = getattr(photo, 'yaw', None)
+            rotation = getattr(photo, 'rotation', None)
             # 将提取的数据写入结果字典
-            piclist[name]["pos"] = [lat, lon, alt, roll, pitch, yaw]
+            piclist[name]["pos"] = [lat, lon, alt, rotation[0], rotation[1], rotation[2]]
 
             # 记录相机型号
             width = getattr(photo, 'width', None)
@@ -472,18 +502,7 @@ class ODM_Result:
         t_c2w = M_inv[:3, 3]
         camera_loc_gps = self.utm_to_lonlat(t_c2w[0], t_c2w[1], t_c2w[2], epsg_number=self.espg_number)
         
-            # ENU to NED
-        A1 = np.array([[0, 1, 0, 0],
-                    [1, 0, 0, 0],
-                    [0, 0, -1, 0],
-                    [0, 0, 0, 1]])
-        # NED to cam
-        A2 = np.array([[0, 1, 0, 0],
-                    [0, 0, 1, 0],
-                    [1, 0, 0, 0],
-                    [0, 0, 0, 1]])
-        roll, pitch, yaw = self.extract_dji_angles_from_M(M, A1, A2)
-        return camera_loc_gps, [roll,pitch,yaw]   
+        return camera_loc_gps, rotation 
 
     def utm_to_lonlat(self, easting, northing, height=None, epsg_number=32650):
         src_crs = f"EPSG:{epsg_number}"
@@ -572,29 +591,10 @@ class ODM_Result:
             rotation = shot_data['rotation']
             translation = shot_data['translation']
             camera_name = shot_data['camera']
-            gps_pos,  euler_angles = self.get_one_shot_info(rotation, translation, self.ori_utm)
-            output_all_shots[shot_name]["pos"] = np.array([gps_pos[0], gps_pos[1], gps_pos[2], euler_angles[0], euler_angles[1], euler_angles[2]])
+            gps_pos,  rotation = self.get_one_shot_info(rotation, translation, self.ori_utm)
+            output_all_shots[shot_name]["pos"] = list([gps_pos[0], gps_pos[1], gps_pos[2], rotation[0], rotation[1], rotation[2]])
             output_all_shots[shot_name]["cam_id"] = camera_name
         return output_all_shots
-
-    def extract_dji_angles_from_M(self, M, A1, A2):
-        A1_3 = A1[:3,:3]
-        A2_3 = A2[:3,:3]
-        M3 = M[:3,:3]
-
-        # Recover rotation used in R = Rx(r) @ Ry(p) @ Rz(y)
-        R = np.linalg.inv(A2_3) @ M3 @ np.linalg.inv(A1_3)
-
-        # Extract Euler angles (r,p,y)
-        p = np.arcsin(R[0,2])
-        r = np.arctan2(-R[1,2], R[2,2])
-        y = np.arctan2(-R[0,1], R[0,0])
-
-        # Convert back to DJI-style degrees
-        roll_deg  = -degrees(r)
-        pitch_deg = -degrees(p)
-        yaw_deg   = -degrees(y)
-        return roll_deg, pitch_deg, yaw_deg
 
 def get_exif_data(images_dir, images_list=[]):  
     supported_extensions = ('.jpg', '.jpeg', '.png', '.tiff', '.gif')
@@ -621,13 +621,10 @@ def get_reconstruction_data(images_dir, images_list=[]):
     return odm_result.get_all_output_shots(picNameList), odm_result.all_cameras
 
     
-def main(images_dir, images_list=[]):
+def get_gcp_info(images_dir, images_list=[]):
     rec_file = os.path.join(images_dir,"opensfm", "reconstruction.json")
-    # piclist, all_cameras = get_exif_data(images_dir, images_list)
     if not os.path.exists(rec_file):
         piclist, all_cameras = get_exif_data(images_dir, images_list)
     else:
         piclist, all_cameras = get_reconstruction_data(images_dir, images_list)
     return piclist, all_cameras
-
-# main('/home/zhangzhong/upload/1978698562191495169/95')
