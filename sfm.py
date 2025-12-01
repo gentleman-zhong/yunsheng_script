@@ -349,20 +349,21 @@ class ODM_Photo:
 
 
 class SFM:
-    def __init__(self, opensfm_path):
-        self.opensfm_path = opensfm_path
+    def __init__(self, project_path):
+        self.project_path = project_path
+        self.opensfm_path = os.path.join(self.project_path, "opensfm")
         self.reconstruction_file = os.path.join(self.opensfm_path, "reconstruction.json")
-        self.all_cameras = {}
-        self.all_shots = {}
-        self.all_points = {}
-        self.all_reference_lla = []
-        self.read_reconstruction_info()
-        self.get_camera_model_pixel()
+        # self.all_cameras = {}
+        # self.all_shots = {}
+        # self.all_points = {}
+        # self.all_reference_lla = []
+        # self.read_reconstruction_info()
+        # self.get_camera_model_pixel()
 
-        self.ori_utm = self.convert_origin(self.all_reference_lla[0])
-        self.espg_number = 32650
-        self.offset = [0.0, 0.0, 0.0]
-        self.get_espg_number(os.path.join(os.path.dirname(opensfm_path), "odm_georeferencing/coords.txt"))
+        # self.ori_utm = self.convert_origin(self.all_reference_lla[0])
+        # self.espg_number = 32650
+        # self.offset = [0.0, 0.0, 0.0]
+        # self.get_espg_number(os.path.join(self.project_path, "odm_georeferencing/coords.txt"))
     
     def read_reconstruction_info(self):
         with open(self.reconstruction_file, "r", encoding="utf-8") as f:
@@ -513,7 +514,11 @@ class SFM:
             output_all_shots[shot_name]["cam_id"] = camera_name
         return output_all_shots
 
-    def paint_features(self, image_dir, feature_dir, output_dir, max_workers=40):
+    def paint_features(self, max_workers=40):
+        image_dir = os.path.join(self.project_path, "images")
+        feature_dir = os.path.join(self.opensfm_path, "features")
+        output_dir = os.path.join(feature_dir, "output")
+        
         os.makedirs(output_dir, exist_ok=True)
 
         def process_single_image(feature_file):
@@ -526,6 +531,7 @@ class SFM:
             points = data['points']  # shape (N,4): x, y, size, angle
 
             image_name = feature_file.replace(".features.npz", "")
+            print(f"正在处理: {image_name}, 特征点数: {len(points)}")
             image_path = os.path.join(image_dir, image_name)
             if not os.path.exists(image_path):
                 print(f"图像不存在: {image_name}")
@@ -560,18 +566,6 @@ class SFM:
             futures = [executor.submit(process_single_image, f) for f in feature_files]
             for _ in as_completed(futures):
                 pass
-
-        # 纬度经度海拔
-        ori_gps = np.array([_origin['latitude'], _origin['longitude'], _origin['altitude']])
-        crs_wgs84 = CRS.from_epsg(4326)
-        aoi = AreaOfInterest(west_lon_degree = ori_gps[1], south_lat_degree = ori_gps[0], east_lon_degree = ori_gps[1], north_lat_degree = ori_gps[0])
-        utm_crs_list = query_utm_crs_info(datum_name = "WGS 84",area_of_interest = aoi)
-        crs_utm = CRS.from_epsg(utm_crs_list[0].code)
-        transformer = Transformer.from_crs(crs_wgs84, crs_utm)
-        ori_utm = transformer.transform(ori_gps[0], ori_gps[1])
-        ori_utm = np.array([ori_utm[0], ori_utm[1], ori_gps[2]])
-        
-        return ori_utm
 
     def get_reprojection_error(self, point3d, shot_data, camera_data, pixel):
         r_matrix = R.from_rotvec(shot_data["rotation"]).as_matrix()
@@ -689,8 +683,6 @@ class SFM:
         tree = ET.ElementTree(root)
         tree.write(metadeata_xml_path, encoding='utf-8', xml_declaration=True)
 
-# sfm = SFM()
-# sfm.paint_features(image_dir="/home/zhangzhong/experiment/only_test/images",
-#                   feature_dir="/home/zhangzhong/experiment/only_test/opensfm/features",
-#                   output_dir="/home/zhangzhong/experiment/only_test/opensfm/features/output")
+sfm = SFM("/home/zhangzhong/experiment/new_standard_data/city")
+sfm.paint_features()
 
