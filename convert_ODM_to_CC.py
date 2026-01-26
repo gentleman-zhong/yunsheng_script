@@ -46,9 +46,9 @@ def init_root(_ori):
   block_name.text = 'ODM - AT'
   block_description = ET.SubElement(block, 'Description')
   block_description.text = 'ODM converts to CC'
-  if not np.array_equal(_ori, np.array([0., 0., 0.])):
-    block_srsid = ET.SubElement(block, 'SRSId')
-    block_srsid.text = '2'
+  # if not np.array_equal(_ori, np.array([0., 0., 0.])):
+  #   block_srsid = ET.SubElement(block, 'SRSId')
+  #   block_srsid.text = '2'
   photogroups = ET.SubElement(block, 'Photogroups')
   tiepoints = ET.SubElement(block, 'TiePoints')
   return root
@@ -545,15 +545,13 @@ if __name__ == '__main__':
   with open(reconstruction_json_path, 'r') as reconstruction_file:
     reconstruction_data = json.load(reconstruction_file)[0] # it's [{things}]
 
-  # origin = reconstruction_data['reference_lla']
-  # if origin['latitude'] == 0. and origin['longitude'] == 0. and origin['altitude'] == 0.:
-  #   ori_utm = np.array([0., 0., 0.])
-  # else:
-  #   ori_utm = convert_origin(origin)
+  origin = reconstruction_data['reference_lla']
+  if origin['latitude'] == 0. and origin['longitude'] == 0. and origin['altitude'] == 0.:
+    ori_utm = np.array([0., 0., 0.])
+  else:
+    ori_utm = convert_origin(origin)
   # convert origin to utm
   # get_metadata_xml(ori_utm, metadeata_xml_path)
-
-  ori_utm = np.array([0., 0., 0.])
 
   tracks_data = {}
   with open(tracks_csv_path, 'r') as tracks_file:
