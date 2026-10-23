@@ -1,0 +1,30 @@
+import {chromium,expect} from '../frontend/node_modules/@playwright/test/index.mjs';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+const base=process.env.AT_VIEWER_TEST_URL||'http://127.0.0.1:8080';
+const browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const page=await browser.newPage({viewport:{width:1600,height:1000}});page.setDefaultTimeout(20000);
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+try{
+ await page.goto(base);const canvas=page.locator('.scene-canvas canvas');await canvas.waitFor();
+ await page.locator('.scene-notice').waitFor({state:'hidden'});
+ const original=await canvas.getAttribute('data-visible-camera-ids'),cloud=await canvas.getAttribute('data-point-cloud-visible');
+ await page.getByRole('button',{name:'复现增量式重建过程',exact:true}).click();
+ const panel=page.getByRole('region',{name:'增量式重建回放'});
+ await expect(panel.getByRole('button',{name:'播放',exact:true})).toBeEnabled();
+ await expect(canvas).toHaveAttribute('data-replay','true');await expect(canvas).toHaveAttribute('data-visible-camera-ids','[]');await expect(canvas).toHaveAttribute('data-point-cloud-visible','false');
+ await panel.getByRole('button',{name:'下一步',exact:true}).click();
+ await expect.poll(async()=>JSON.parse(await canvas.getAttribute('data-visible-camera-ids')).length).toBe(2);
+ await panel.getByRole('button',{name:'下一步',exact:true}).click();await expect(panel.locator('.replay-current')).toContainText('第 3 张');
+ await panel.getByRole('button',{name:'上一步',exact:true}).click();await expect.poll(async()=>JSON.parse(await canvas.getAttribute('data-visible-camera-ids')).length).toBe(2);
+ await panel.getByRole('combobox',{name:'回放速度'}).selectOption('4');
+ await panel.getByRole('button',{name:'播放',exact:true}).click();await page.waitForTimeout(650);await panel.getByRole('button',{name:'暂停',exact:true}).click();
+ const paused=await panel.getByLabel('回放进度').inputValue();await page.waitForTimeout(450);assert.equal(await panel.getByLabel('回放进度').inputValue(),paused);
+ await panel.getByLabel('最终点云背景').check();await expect(canvas).toHaveAttribute('data-point-cloud-visible','true');
+ const range=panel.getByLabel('回放进度');const max=await range.getAttribute('max');await range.evaluate((el,value)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))},max);await expect(panel.locator('.replay-current')).toContainText('回放结束');
+ await panel.getByRole('button',{name:'从头开始',exact:true}).click();await expect(canvas).toHaveAttribute('data-visible-camera-ids','[]');
+ await panel.getByRole('button',{name:'下一步',exact:true}).click();
+ const output=new URL('../validation/replay/',import.meta.url);await fs.mkdir(output,{recursive:true});await page.screenshot({path:new URL('replay-initial.png',output).pathname});
+ await panel.getByRole('button',{name:'退出回放',exact:true}).click();await expect(canvas).toHaveAttribute('data-replay','false');await expect(canvas).toHaveAttribute('data-visible-camera-ids',original);await expect(canvas).toHaveAttribute('data-point-cloud-visible',cloud);
+ assert.deepEqual(errors,[]);console.log('PASS replay controls, actual camera visibility, background and restored scene');
+}finally{await browser.close()}

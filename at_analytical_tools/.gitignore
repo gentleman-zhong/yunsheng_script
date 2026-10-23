@@ -1,0 +1,13 @@
+.venv/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+.pytest_cache/
+test-results/
+!frontend/src/
+!frontend/src/**
+.cache/
+.browsers/
+.npm-cache/
+.pip-cache/
+validation/
